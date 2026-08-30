@@ -1,8 +1,7 @@
 # EE 542 Lab 2 – Fast, Reliable File Transfer
 
 ## Part 1: Simulating Networking Environments
-## Case 1 The round-trip time (RTT) of 10ms with the Loss rate of 1% (bi-directional) on a network 
-configured to transfer at 100Mbits/sec for the server, client, and router. (Tests conducted by Junyu Zhao)
+## Case 1 The round-trip time (RTT) of 10ms with the Loss rate of 1% (bi-directional) on a network configured to transfer at 100Mbits/sec for the server, client, and router. (Tests conducted by Junyu Zhao)
 
 ### Summary
 
@@ -49,6 +48,8 @@ VyOS interface toward the Client
 VyOS interface toward the Server
 
 After the adjustment, TCP throughput stabilized at approximately 95–96 Mbit/s, with 0 retransmissions.
+<img width="940" height="495" alt="image" src="https://github.com/user-attachments/assets/f1bdeb49-052c-4b48-a855-a7c3ac617077" />
+
 
 The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue parameters (latency and burst) were adjusted to better match the VMware environment.
 
