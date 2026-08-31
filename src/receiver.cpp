@@ -4,12 +4,14 @@
 #include <map>
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
+#include <thread>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#include "../include/protocol.h"
+#include "protocol.h"
 
 int main(int argc, char* argv[])
 {
@@ -40,11 +42,15 @@ int main(int argc, char* argv[])
     // ------------------------------------------------------------
 
     sockaddr_in receiver_addr{};
+
     receiver_addr.sin_family = AF_INET;
     receiver_addr.sin_addr.s_addr = INADDR_ANY;
     receiver_addr.sin_port = htons(port);
 
-    if (bind(sockfd,reinterpret_cast<sockaddr*>(&receiver_addr),sizeof(receiver_addr)) < 0)
+    if (bind(
+            sockfd,
+            reinterpret_cast<sockaddr*>(&receiver_addr),
+            sizeof(receiver_addr)) < 0)
     {
         perror("bind");
         close(sockfd);
@@ -58,15 +64,25 @@ int main(int argc, char* argv[])
     // 3. Wait for META packet
     // ------------------------------------------------------------
 
-    std::vector<char> packet_buffer(sizeof(PacketHeader) + MAX_PAYLOAD_SIZE);
+    std::vector<char> packet_buffer(
+        sizeof(PacketHeader) + MAX_PAYLOAD_SIZE
+    );
 
     sockaddr_in sender_addr{};
     socklen_t sender_addr_len = sizeof(sender_addr);
 
-    ssize_t received = recvfrom(sockfd,packet_buffer.data(),packet_buffer.size(), 0,reinterpret_cast<sockaddr*>(&sender_addr),&sender_addr_len);
+    ssize_t received = recvfrom(
+        sockfd,
+        packet_buffer.data(),
+        packet_buffer.size(),
+        0,
+        reinterpret_cast<sockaddr*>(&sender_addr),
+        &sender_addr_len
+    );
 
-    if (received < static_cast<ssize_t>(
-                       sizeof(PacketHeader) + sizeof(MetaPayload)))
+    if (received <
+        static_cast<ssize_t>(
+            sizeof(PacketHeader) + sizeof(MetaPayload)))
     {
         std::cerr << "Invalid META packet\n";
         close(sockfd);
@@ -82,7 +98,8 @@ int main(int argc, char* argv[])
     );
 
     if (meta_header.protocol_id != PROTOCOL_ID ||
-        meta_header.type != static_cast<uint8_t>(PacketType::META))
+        meta_header.type !=
+            static_cast<uint8_t>(PacketType::META))
     {
         std::cerr << "Expected META packet\n";
         close(sockfd);
@@ -167,8 +184,8 @@ int main(int argc, char* argv[])
             &sender_addr_len
         );
 
-        if (received < static_cast<ssize_t>(
-                           sizeof(PacketHeader)))
+        if (received <
+            static_cast<ssize_t>(sizeof(PacketHeader)))
         {
             continue;
         }
@@ -190,6 +207,36 @@ int main(int argc, char* argv[])
             static_cast<PacketType>(header.type);
 
         // --------------------------------------------------------
+        // Duplicate META
+        //
+        // This can happen if the original META_ACK was lost.
+        // Do not reopen/reset the file. Just resend META_ACK.
+        // --------------------------------------------------------
+
+        if (type == PacketType::META)
+        {
+            PacketHeader duplicate_meta_ack{};
+
+            duplicate_meta_ack.protocol_id = PROTOCOL_ID;
+            duplicate_meta_ack.seq = 0;
+            duplicate_meta_ack.length = 0;
+            duplicate_meta_ack.type =
+                static_cast<uint8_t>(PacketType::META_ACK);
+            duplicate_meta_ack.reserved = 0;
+
+            sendto(
+                sockfd,
+                &duplicate_meta_ack,
+                sizeof(duplicate_meta_ack),
+                0,
+                reinterpret_cast<sockaddr*>(&sender_addr),
+                sender_addr_len
+            );
+
+            continue;
+        }
+
+        // --------------------------------------------------------
         // DATA packet
         // --------------------------------------------------------
 
@@ -203,14 +250,16 @@ int main(int argc, char* argv[])
 
             if (received <
                 static_cast<ssize_t>(
-                    sizeof(PacketHeader) +
-                    header.length))
+                    sizeof(PacketHeader) + header.length))
             {
                 continue;
             }
 
-            // If this packet has not already been written,
-            // save it in the out-of-order buffer.
+            // ----------------------------------------------------
+            // Save packet if it has not already been written or
+            // buffered.
+            // ----------------------------------------------------
+
             if (header.seq >= expected_seq &&
                 out_of_order_buffer.find(header.seq) ==
                     out_of_order_buffer.end())
@@ -231,7 +280,10 @@ int main(int argc, char* argv[])
             }
 
             // ----------------------------------------------------
-            // Send ACK for this DATA packet
+            // Send ACK for every valid DATA packet.
+            //
+            // Even duplicate DATA packets are ACKed again because
+            // the previous ACK may have been lost.
             // ----------------------------------------------------
 
             PacketHeader ack{};
@@ -261,8 +313,7 @@ int main(int argc, char* argv[])
                 auto it =
                     out_of_order_buffer.find(expected_seq);
 
-                if (it ==
-                    out_of_order_buffer.end())
+                if (it == out_of_order_buffer.end())
                 {
                     break;
                 }
@@ -287,20 +338,17 @@ int main(int argc, char* argv[])
 
         else if (type == PacketType::FIN)
         {
-            if (expected_seq ==
-                meta.total_packets)
+            // Only accept FIN after every DATA packet has been
+            // received and written in order.
+            if (expected_seq == meta.total_packets)
             {
                 PacketHeader fin_ack{};
 
-                fin_ack.protocol_id =
-                    PROTOCOL_ID;
-                fin_ack.seq =
-                    expected_seq;
+                fin_ack.protocol_id = PROTOCOL_ID;
+                fin_ack.seq = expected_seq;
                 fin_ack.length = 0;
                 fin_ack.type =
-                    static_cast<uint8_t>(
-                        PacketType::FIN_ACK
-                    );
+                    static_cast<uint8_t>(PacketType::FIN_ACK);
                 fin_ack.reserved = 0;
 
                 sendto(
@@ -308,9 +356,7 @@ int main(int argc, char* argv[])
                     &fin_ack,
                     sizeof(fin_ack),
                     0,
-                    reinterpret_cast<sockaddr*>(
-                        &sender_addr
-                    ),
+                    reinterpret_cast<sockaddr*>(&sender_addr),
                     sender_addr_len
                 );
 
@@ -320,7 +366,79 @@ int main(int argc, char* argv[])
     }
 
     // ------------------------------------------------------------
-    // 7. Cleanup
+    // 7. FIN grace period
+    //
+    // The first FIN_ACK may be lost. Keep the socket alive for
+    // a short time so that retransmitted FIN packets can receive
+    // another FIN_ACK.
+    // ------------------------------------------------------------
+
+    constexpr int FIN_GRACE_MS = 2000;
+
+    auto grace_start =
+        std::chrono::steady_clock::now();
+
+    while (true)
+    {
+        auto now =
+            std::chrono::steady_clock::now();
+
+        auto elapsed_ms =
+            std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                now - grace_start
+            ).count();
+
+        if (elapsed_ms >= FIN_GRACE_MS)
+        {
+            break;
+        }
+
+        PacketHeader header{};
+
+        ssize_t grace_received = recvfrom(
+            sockfd,
+            &header,
+            sizeof(header),
+            MSG_DONTWAIT,
+            reinterpret_cast<sockaddr*>(&sender_addr),
+            &sender_addr_len
+        );
+
+        if (grace_received >=
+            static_cast<ssize_t>(sizeof(PacketHeader)))
+        {
+            if (header.protocol_id == PROTOCOL_ID &&
+                header.type ==
+                    static_cast<uint8_t>(PacketType::FIN))
+            {
+                PacketHeader fin_ack{};
+
+                fin_ack.protocol_id = PROTOCOL_ID;
+                fin_ack.seq = expected_seq;
+                fin_ack.length = 0;
+                fin_ack.type =
+                    static_cast<uint8_t>(PacketType::FIN_ACK);
+                fin_ack.reserved = 0;
+
+                sendto(
+                    sockfd,
+                    &fin_ack,
+                    sizeof(fin_ack),
+                    0,
+                    reinterpret_cast<sockaddr*>(&sender_addr),
+                    sender_addr_len
+                );
+            }
+        }
+
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(1)
+        );
+    }
+
+    // ------------------------------------------------------------
+    // 8. Cleanup
     // ------------------------------------------------------------
 
     output.close();
