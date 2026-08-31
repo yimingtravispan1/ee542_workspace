@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <algorithm>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -20,13 +21,70 @@ struct OutstandingPacket
     std::chrono::steady_clock::time_point sent_time;
 };
 
+
+// ------------------------------------------------------------
+// Application-level pacing
+//
+// This prevents the UDP sender from injecting packets much
+// faster than the 100 Mbit/s shaped link can handle.
+// ------------------------------------------------------------
+
+void pace_packet(
+    std::chrono::steady_clock::time_point& next_send_time,
+    std::size_t packet_size,
+    double rate_mbps)
+{
+    // Approximate IPv4 + UDP header overhead.
+    constexpr std::size_t NETWORK_OVERHEAD = 28;
+
+    std::size_t wire_bytes =
+        packet_size + NETWORK_OVERHEAD;
+
+    double interval_seconds =
+        (static_cast<double>(wire_bytes) * 8.0) /
+        (rate_mbps * 1'000'000.0);
+
+    auto interval =
+        std::chrono::duration<double>(
+            interval_seconds
+        );
+
+    next_send_time +=
+        std::chrono::duration_cast<
+            std::chrono::steady_clock::duration
+        >(interval);
+
+    auto now =
+        std::chrono::steady_clock::now();
+
+    if (next_send_time > now)
+    {
+        std::this_thread::sleep_until(
+            next_send_time
+        );
+    }
+    else
+    {
+        // If the sender has fallen behind schedule,
+        // restart pacing from the current time.
+        next_send_time = now;
+    }
+}
+
+
+// ------------------------------------------------------------
+// Wait for a specific control packet.
+// Used by META/META_ACK and FIN/FIN_ACK handshakes.
+// ------------------------------------------------------------
+
 bool wait_for_packet_type(
     int sockfd,
     PacketType expected_type,
     int timeout_ms,
     PacketHeader& received_header)
 {
-    auto start = std::chrono::steady_clock::now();
+    auto start =
+        std::chrono::steady_clock::now();
 
     while (true)
     {
@@ -39,20 +97,26 @@ bool wait_for_packet_type(
             nullptr
         );
 
-        if (received >= static_cast<ssize_t>(sizeof(PacketHeader)))
+        if (received >=
+            static_cast<ssize_t>(
+                sizeof(PacketHeader)))
         {
-            if (received_header.protocol_id == PROTOCOL_ID &&
+            if (received_header.protocol_id ==
+                    PROTOCOL_ID &&
                 received_header.type ==
-                    static_cast<uint8_t>(expected_type))
+                    static_cast<uint8_t>(
+                        expected_type))
             {
                 return true;
             }
         }
 
-        auto now = std::chrono::steady_clock::now();
+        auto now =
+            std::chrono::steady_clock::now();
 
         auto elapsed_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::duration_cast<
+                std::chrono::milliseconds>(
                 now - start
             ).count();
 
@@ -67,14 +131,17 @@ bool wait_for_packet_type(
     }
 }
 
+
 int main(int argc, char* argv[])
 {
-    if (argc < 4 || argc > 6)
+    if (argc < 4 || argc > 7)
     {
         std::cerr
             << "Usage: " << argv[0]
             << " <receiver_ip> <port> <input_file>"
-            << " [payload_size] [window_size]\n";
+            << " [payload_size]"
+            << " [window_size]"
+            << " [pacing_rate_mbps]\n";
 
         return 1;
     }
@@ -83,8 +150,14 @@ int main(int argc, char* argv[])
     int port = std::atoi(argv[2]);
     const char* input_file = argv[3];
 
-    std::size_t payload_size = PAYLOAD_MTU_1500;
-    std::size_t window_size = DEFAULT_WINDOW_SIZE;
+    std::size_t payload_size =
+        PAYLOAD_MTU_1500;
+
+    std::size_t window_size =
+        DEFAULT_WINDOW_SIZE;
+
+    // Start slightly below the 100 Mbit/s shaped link.
+    double pacing_rate_mbps = 90.0;
 
     if (argc >= 5)
     {
@@ -102,18 +175,37 @@ int main(int argc, char* argv[])
             );
     }
 
+    if (argc >= 7)
+    {
+        pacing_rate_mbps =
+            std::stod(argv[6]);
+    }
+
     if (payload_size == 0 ||
         payload_size > MAX_PAYLOAD_SIZE)
     {
-        std::cerr << "Invalid payload size\n";
+        std::cerr
+            << "Invalid payload size\n";
+
         return 1;
     }
 
     if (window_size == 0)
     {
-        std::cerr << "Invalid window size\n";
+        std::cerr
+            << "Invalid window size\n";
+
         return 1;
     }
+
+    if (pacing_rate_mbps <= 0.0)
+    {
+        std::cerr
+            << "Invalid pacing rate\n";
+
+        return 1;
+    }
+
 
     // ------------------------------------------------------------
     // 1. Open input file
@@ -121,7 +213,8 @@ int main(int argc, char* argv[])
 
     std::ifstream input(
         input_file,
-        std::ios::binary | std::ios::ate
+        std::ios::binary |
+        std::ios::ate
     );
 
     if (!input)
@@ -129,29 +222,55 @@ int main(int argc, char* argv[])
         std::cerr
             << "Cannot open input file: "
             << input_file << "\n";
+
         return 1;
     }
 
     uint64_t file_size =
-        static_cast<uint64_t>(input.tellg());
+        static_cast<uint64_t>(
+            input.tellg()
+        );
 
-    input.seekg(0, std::ios::beg);
+    input.seekg(
+        0,
+        std::ios::beg
+    );
 
     uint32_t total_packets =
         static_cast<uint32_t>(
-            (file_size + payload_size - 1)
-            / payload_size
+            (file_size +
+             payload_size - 1) /
+            payload_size
         );
 
-    std::cout << "File information:\n";
-    std::cout << "  File size: "
-              << file_size << " bytes\n";
-    std::cout << "  Payload size: "
-              << payload_size << " bytes\n";
-    std::cout << "  Total packets: "
-              << total_packets << "\n";
-    std::cout << "  Window size: "
-              << window_size << " packets\n";
+    std::cout
+        << "File information:\n";
+
+    std::cout
+        << "  File size: "
+        << file_size
+        << " bytes\n";
+
+    std::cout
+        << "  Payload size: "
+        << payload_size
+        << " bytes\n";
+
+    std::cout
+        << "  Total packets: "
+        << total_packets
+        << "\n";
+
+    std::cout
+        << "  Window size: "
+        << window_size
+        << " packets\n";
+
+    std::cout
+        << "  Pacing rate: "
+        << pacing_rate_mbps
+        << " Mbit/s\n";
+
 
     // ------------------------------------------------------------
     // 2. Create UDP socket
@@ -169,7 +288,11 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // Increase socket buffers for high-bandwidth testing.
+
+    // ------------------------------------------------------------
+    // Increase socket buffers
+    // ------------------------------------------------------------
+
     int socket_buffer_size =
         16 * 1024 * 1024;
 
@@ -189,14 +312,18 @@ int main(int argc, char* argv[])
         sizeof(socket_buffer_size)
     );
 
+
     // ------------------------------------------------------------
     // 3. Configure Receiver address
     // ------------------------------------------------------------
 
     sockaddr_in receiver_addr{};
 
-    receiver_addr.sin_family = AF_INET;
-    receiver_addr.sin_port = htons(port);
+    receiver_addr.sin_family =
+        AF_INET;
+
+    receiver_addr.sin_port =
+        htons(port);
 
     if (inet_pton(
             AF_INET,
@@ -210,36 +337,47 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+
     // ------------------------------------------------------------
     // 4. META handshake
     // ------------------------------------------------------------
 
     std::vector<char> meta_packet(
-        sizeof(PacketHeader)
-        + sizeof(MetaPayload)
+        sizeof(PacketHeader) +
+        sizeof(MetaPayload)
     );
 
     PacketHeader meta_header{};
 
-    meta_header.protocol_id = PROTOCOL_ID;
+    meta_header.protocol_id =
+        PROTOCOL_ID;
+
     meta_header.seq = 0;
+
     meta_header.length =
         sizeof(MetaPayload);
+
     meta_header.type =
         static_cast<uint8_t>(
             PacketType::META
         );
+
     meta_header.reserved = 0;
+
 
     MetaPayload meta{};
 
-    meta.file_size = file_size;
+    meta.file_size =
+        file_size;
+
     meta.payload_size =
         static_cast<uint32_t>(
             payload_size
         );
+
     meta.total_packets =
         total_packets;
+
 
     std::memcpy(
         meta_packet.data(),
@@ -248,11 +386,12 @@ int main(int argc, char* argv[])
     );
 
     std::memcpy(
-        meta_packet.data()
-            + sizeof(meta_header),
+        meta_packet.data() +
+            sizeof(meta_header),
         &meta,
         sizeof(meta)
     );
+
 
     std::cout
         << "Starting META handshake...\n";
@@ -282,11 +421,13 @@ int main(int argc, char* argv[])
         }
 
         std::cout
-            << "META timeout, retransmitting...\n";
+            << "META timeout, "
+            << "retransmitting...\n";
     }
 
     std::cout
         << "META handshake complete.\n";
+
 
     // ------------------------------------------------------------
     // 5. Start transfer timing
@@ -294,6 +435,9 @@ int main(int argc, char* argv[])
 
     auto transfer_start =
         std::chrono::steady_clock::now();
+
+    auto next_send_time =
+        transfer_start;
 
     uint32_t next_seq = 0;
 
@@ -304,6 +448,7 @@ int main(int argc, char* argv[])
 
     uint64_t retransmissions = 0;
     uint64_t packets_sent = 0;
+
 
     // ------------------------------------------------------------
     // 6. Main sliding-window loop
@@ -325,33 +470,40 @@ int main(int argc, char* argv[])
                     next_seq
                 ) * payload_size;
 
-            std::size_t current_payload_size =
-                static_cast<std::size_t>(
-                    std::min<uint64_t>(
-                        payload_size,
-                        file_size - offset
-                    )
-                );
+            std::size_t
+                current_payload_size =
+                    static_cast<std::size_t>(
+                        std::min<uint64_t>(
+                            payload_size,
+                            file_size - offset
+                        )
+                    );
 
             std::vector<char> packet(
-                sizeof(PacketHeader)
-                + current_payload_size
+                sizeof(PacketHeader) +
+                current_payload_size
             );
 
             PacketHeader header{};
 
             header.protocol_id =
                 PROTOCOL_ID;
-            header.seq = next_seq;
+
+            header.seq =
+                next_seq;
+
             header.length =
                 static_cast<uint16_t>(
                     current_payload_size
                 );
+
             header.type =
                 static_cast<uint8_t>(
                     PacketType::DATA
                 );
+
             header.reserved = 0;
+
 
             std::memcpy(
                 packet.data(),
@@ -360,10 +512,15 @@ int main(int argc, char* argv[])
             );
 
             input.read(
-                packet.data()
-                    + sizeof(PacketHeader),
+                packet.data() +
+                    sizeof(PacketHeader),
                 current_payload_size
             );
+
+
+            // ----------------------------------------------------
+            // Send DATA packet
+            // ----------------------------------------------------
 
             sendto(
                 sockfd,
@@ -375,6 +532,18 @@ int main(int argc, char* argv[])
                 ),
                 sizeof(receiver_addr)
             );
+
+
+            // ----------------------------------------------------
+            // Pace DATA transmission
+            // ----------------------------------------------------
+
+            pace_packet(
+                next_send_time,
+                packet.size(),
+                pacing_rate_mbps
+            );
+
 
             OutstandingPacket state{};
 
@@ -392,6 +561,7 @@ int main(int argc, char* argv[])
             ++next_seq;
             ++packets_sent;
         }
+
 
         // --------------------------------------------------------
         // Process all available ACKs
@@ -433,11 +603,13 @@ int main(int argc, char* argv[])
                     ack.seq
                 );
 
-            if (it != outstanding.end())
+            if (it !=
+                outstanding.end())
             {
                 outstanding.erase(it);
             }
         }
+
 
         // --------------------------------------------------------
         // Retransmit timed-out packets
@@ -446,7 +618,8 @@ int main(int argc, char* argv[])
         auto now =
             std::chrono::steady_clock::now();
 
-        for (auto& entry : outstanding)
+        for (auto& entry :
+             outstanding)
         {
             OutstandingPacket& state =
                 entry.second;
@@ -456,7 +629,8 @@ int main(int argc, char* argv[])
                     duration_cast<
                         std::chrono::milliseconds
                     >(
-                        now - state.sent_time
+                        now -
+                        state.sent_time
                     ).count();
 
             if (elapsed_ms >=
@@ -475,17 +649,34 @@ int main(int argc, char* argv[])
                     sizeof(receiver_addr)
                 );
 
-                state.sent_time = now;
+
+                // ------------------------------------------------
+                // Pace retransmission as well.
+                // ------------------------------------------------
+
+                pace_packet(
+                    next_send_time,
+                    state.packet.size(),
+                    pacing_rate_mbps
+                );
+
+
+                state.sent_time =
+                    std::chrono::
+                        steady_clock::now();
 
                 ++retransmissions;
                 ++packets_sent;
             }
         }
 
+
         std::this_thread::sleep_for(
-            std::chrono::microseconds(100)
+            std::chrono::
+                microseconds(100)
         );
     }
+
 
     // ------------------------------------------------------------
     // 7. FIN handshake
@@ -493,17 +684,25 @@ int main(int argc, char* argv[])
 
     PacketHeader fin{};
 
-    fin.protocol_id = PROTOCOL_ID;
-    fin.seq = total_packets;
+    fin.protocol_id =
+        PROTOCOL_ID;
+
+    fin.seq =
+        total_packets;
+
     fin.length = 0;
+
     fin.type =
         static_cast<uint8_t>(
             PacketType::FIN
         );
+
     fin.reserved = 0;
+
 
     std::cout
         << "All DATA packets acknowledged.\n";
+
 
     while (true)
     {
@@ -530,11 +729,14 @@ int main(int argc, char* argv[])
         }
 
         std::cout
-            << "FIN timeout, retransmitting...\n";
+            << "FIN timeout, "
+            << "retransmitting...\n";
     }
+
 
     auto transfer_end =
         std::chrono::steady_clock::now();
+
 
     // ------------------------------------------------------------
     // 8. Calculate statistics
@@ -542,16 +744,23 @@ int main(int argc, char* argv[])
 
     double elapsed_seconds =
         std::chrono::duration<double>(
-            transfer_end - transfer_start
+            transfer_end -
+            transfer_start
         ).count();
 
     double throughput_mbps =
-        (static_cast<double>(file_size)
-         * 8.0)
-        / elapsed_seconds
-        / 1'000'000.0;
+        (static_cast<double>(
+            file_size
+         ) * 8.0)
+        /
+        elapsed_seconds
+        /
+        1'000'000.0;
 
-    std::cout << "\nTransfer complete.\n";
+
+    std::cout
+        << "\nTransfer complete.\n";
+
     std::cout
         << "Time: "
         << elapsed_seconds
@@ -564,11 +773,14 @@ int main(int argc, char* argv[])
 
     std::cout
         << "Total UDP transmissions: "
-        << packets_sent << "\n";
+        << packets_sent
+        << "\n";
 
     std::cout
         << "Retransmissions: "
-        << retransmissions << "\n";
+        << retransmissions
+        << "\n";
+
 
     input.close();
     close(sockfd);
