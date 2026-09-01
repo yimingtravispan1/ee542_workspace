@@ -28,8 +28,6 @@ The observed ping packet loss was around **2%–2.5% round-trip**. Since **1% pa
 ### Configuration Adjustment
 
 The original lab document used the following TBF parameters:
-
-The original lab document used the following TBF parameters:
 rate 100mbit latency 0.001ms burst 9015
 
 In my VMware environment, this configuration only produced approximately 50–60 Mbit/s TCP throughput and resulted in a large number of retransmissions.
