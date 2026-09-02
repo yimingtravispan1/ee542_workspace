@@ -90,3 +90,33 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 #### Observation
 
 UDP throughput remained around 78 Mbps, while TCP throughput dropped significantly under high RTT and packet loss.
+
+### Case 3: RTT 200 ms, Packet Loss 0%, Router Limited to 80 Mbps
+<img width="643" height="144" alt="Screenshot 2026-09-01 at 9 56 22 PM" src="https://github.com/user-attachments/assets/d03e1f91-d51c-4c9f-a7c6-8ad724773509" />
+
+#### Results
+
+##### Ping: Client → Server
+
+![Ping Client to Server](images/case3_ping_client_to_server.png)
+
+##### Ping: Server → Client
+
+![Ping Server to Client](images/case3_ping_server_to_client.png)
+
+##### UDP iperf: Client → Server
+
+![UDP iperf Client to Server](images/case3_udp_client_to_server.png)
+
+##### UDP iperf: Server → Client
+
+![UDP iperf Server to Client](images/case3_udp_server_to_client.png)
+
+##### TCP iperf: Client → Server
+
+![TCP iperf Client to Server](images/case3_tcp_client_to_server.png)
+
+##### TCP iperf: Server → Client
+
+![TCP iperf Client to Server](images/case3_tcp_server_to_client.png)
+
