@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 
-// Protocol identifier used to recognize packets from our protocol.
+// Protocol identifier used to recognize packets from our protocol (EE54 as a signature).
 constexpr uint32_t PROTOCOL_ID = 0x45453534;
 
 // Maximum payload supported by the protocol.
