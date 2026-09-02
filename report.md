@@ -131,3 +131,5 @@ UDP throughput remained around 78 Mbps, while TCP throughput dropped significant
 | TCP iperf | Client → Server | - | 41.6 Mbits/sec receiver | - |
 | TCP iperf | Server → Client | - | 56.5 Mbits/sec receiver | - |
 
+## noted: throughput of case 3 was more than 20x of that of case 2
+
