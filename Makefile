@@ -1,17 +1,24 @@
-CXX = g++
-CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -Iinclude
+CC := gcc
+CFLAGS := -O3 -Wall -Wextra -Wpedantic -std=c11
 
-TARGETS = sender receiver
+SRC_DIR := src
+BUILD_DIR := build
 
-all: $(TARGETS)
+all: sender receiver
 
-sender: src/sender.cpp include/protocol.h
-	$(CXX) $(CXXFLAGS) src/sender.cpp -o sender
+sender: $(BUILD_DIR)/sender.o $(BUILD_DIR)/common.o
+	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-receiver: src/receiver.cpp include/protocol.h
-	$(CXX) $(CXXFLAGS) src/receiver.cpp -o receiver
+receiver: $(BUILD_DIR)/receiver.o $(BUILD_DIR)/common.o
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/protocol.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -f $(TARGETS)
+	rm -rf $(BUILD_DIR) sender receiver
 
 .PHONY: all clean
