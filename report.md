@@ -120,3 +120,14 @@ UDP throughput remained around 78 Mbps, while TCP throughput dropped significant
 
 ![TCP iperf Client to Server](images/case3_tcp_server_to_client.png)
 
+#### Summary
+
+| Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss |
+|---|---|---:|---:|---:|
+| Ping | Client → Server | 224.361 ms | - | 0% |
+| Ping | Server → Client | 224.139 ms | - | 0% |
+| UDP iperf | Client → Server | - | 70.5 Mbits/sec | 28% |
+| UDP iperf | Server → Client | - | 71.7 Mbits/sec | 28% |
+| TCP iperf | Client → Server | - | 41.6 Mbits/sec receiver | - |
+| TCP iperf | Server → Client | - | 56.5 Mbits/sec receiver | - |
+
