@@ -133,3 +133,15 @@ UDP throughput remained around 78 Mbps, while TCP throughput dropped significant
 
 ## noted: throughput of case 3 was more than 20x of that of case 2
 
+## Part 2: Fast and Reliable File Transfer
+
+### Results
+
+| Case | MTU | Pacing Rate | Time (s) | Goodput (Mbps) | Retransmissions | MD5 Match |
+|---|---:|---:|---:|---:|---:|:---:|
+| Case 1 | 1500 | 95 Mbps | 97.539 | 88.066 | 21,123 | Yes |
+| Case 1 | 9001 | 95 Mbps | 94.692 | 90.714 | 3,644 | Yes |
+| Case 2 | 1500 | 95 Mbps | 170.754 | 50.306 | 435,200 | Yes |
+| Case 2 | 9001 | 95 Mbps | 158.518 | 54.189 | 85,230 | Yes |
+| Case 3 | 1500 | 75 Mbps | 115.597 | 74.309 | 5 | Yes |
+| Case 3 | 9001 | 75 Mbps | 111.600 | 76.971 | 0 | Yes |
