@@ -6,6 +6,10 @@
 #include <cstdlib>
 #include <chrono>
 #include <thread>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -35,6 +39,13 @@ int main(int argc, char* argv[])
         perror("socket");
         return 1;
     }
+
+    // Leave enough room for packets received while the network thread briefly
+    // updates the reorder and writer queues.
+    int socket_buffer_size = 16 * 1024 * 1024;
+
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,
+               &socket_buffer_size, sizeof(socket_buffer_size));
 
     // ------------------------------------------------------------
     // 2. Bind socket to local UDP port
@@ -111,6 +122,55 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // The network thread only receives, validates, acknowledges, and orders
+    // packets. A dedicated writer keeps file I/O from delaying UDP reception.
+    std::deque<std::vector<char>> write_queue;
+    std::mutex write_queue_mutex;
+    std::condition_variable data_ready;
+    bool writer_stop = false;
+    std::atomic<bool> writer_failed{false};
+    uint64_t bytes_written = 0;
+
+    std::thread writer([&]()
+    {
+        while (true)
+        {
+            std::vector<char> data;
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex);
+
+                data_ready.wait(lock, [&]()
+                {
+                    return writer_stop || !write_queue.empty();
+                });
+
+                if (write_queue.empty())
+                {
+                    if (writer_stop)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
+                data = std::move(write_queue.front());
+                write_queue.pop_front();
+            }
+
+            output.write(data.data(), data.size());
+
+            if (!output)
+            {
+                writer_failed.store(true, std::memory_order_relaxed);
+                break;
+            }
+
+            bytes_written += data.size();
+        }
+    });
+
     // ------------------------------------------------------------
     // 5. Send META_ACK
     // ------------------------------------------------------------
@@ -135,7 +195,6 @@ int main(int argc, char* argv[])
     // Store packets that arrive before earlier packets
     std::map<uint32_t, std::vector<char>> out_of_order_buffer;
 
-    uint64_t bytes_written = 0;
     bool transfer_finished = false;
 
     while (!transfer_finished)
@@ -227,23 +286,27 @@ int main(int argc, char* argv[])
             sendto(sockfd, &ack, sizeof(ack), 0,
             reinterpret_cast<sockaddr*>(&sender_addr), sender_addr_len);
 
-            // Write all packets that are now available in correct order
-            while (true)
+            // Move every newly contiguous packet to the writer thread.
             {
-                auto it = out_of_order_buffer.find(expected_seq);
+                std::lock_guard<std::mutex> lock(write_queue_mutex);
 
-                if (it == out_of_order_buffer.end())
+                while (true)
                 {
-                    break;
+                    auto it = out_of_order_buffer.find(expected_seq);
+
+                    if (it == out_of_order_buffer.end())
+                    {
+                        break;
+                    }
+
+                    write_queue.push_back(std::move(it->second));
+
+                    out_of_order_buffer.erase(it);
+                    ++expected_seq;
                 }
-
-                output.write(it->second.data(), it->second.size());
-
-                bytes_written += it->second.size();
-
-                out_of_order_buffer.erase(it);
-                ++expected_seq;
             }
+
+            data_ready.notify_one();
         }
 
         // --------------------------------------------------------
@@ -252,8 +315,8 @@ int main(int argc, char* argv[])
 
         else if (type == PacketType::FIN)
         {
-            // Only finish after every DATA packet has been received
-            // and written to the output file
+            // Only finish after every DATA packet has been received and queued
+            // in order. The writer thread is joined before the process exits.
             if (expected_seq == meta.total_packets)
             {
                 PacketHeader fin_ack{};
@@ -324,6 +387,14 @@ int main(int argc, char* argv[])
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
+    {
+        std::lock_guard<std::mutex> lock(write_queue_mutex);
+        writer_stop = true;
+    }
+
+    data_ready.notify_one();
+    writer.join();
+
     // ------------------------------------------------------------
     // 8. Cleanup
     // ------------------------------------------------------------
@@ -334,6 +405,12 @@ int main(int argc, char* argv[])
     std::cout << "Transfer complete.\n";
     std::cout << "Bytes written: " << bytes_written << "\n";
     std::cout << "Saved to: " << output_file << "\n";
+
+    if (writer_failed.load(std::memory_order_relaxed))
+    {
+        std::cerr << "Failed while writing output file\n";
+        return 1;
+    }
 
     return 0;
 }
