@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -Iinclude
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude
 
 TARGETS = sender receiver
 
