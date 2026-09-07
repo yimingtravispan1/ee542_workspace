@@ -183,11 +183,11 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 | 1500 | UDP iperf | Server → Client | - | 71.7 Mbits/sec | 28% |
 | 1500 | TCP iperf | Client → Server | - | 41.6 Mbits/sec receiver | - |
 | 1500 | TCP iperf | Server → Client | - | 56.5 Mbits/sec receiver | - |
-| 9000 | Ping | Client → Server | 201.155 ms | — | 34% |
-| 9000 | Ping | Server → Client | 201.207 ms | — | 38.5% |
+| 9000 | Ping | Client → Server | 201.050 ms | — | 34% |
+| 9000 | Ping | Server → Client | 201.036 ms | — | 38.5% |
 | 9000 | UDP iperf | Client → Server | — | 77.7 Mbit/s | 22% |
-| 9000 | UDP iperf | Server → Client | — | 77.7 Mbit/s | 22% |
-| 9000 | TCP iperf | Client → Server | — | 469 Kbit/s | — |
+| 9000 | UDP iperf | Server → Client | — | 77.9 Mbit/s | 22% |
+| 9000 | TCP iperf | Client → Server | — | - | — |
 
 ## noted: throughput of case 3 was more than 20x of that of case 2
 
