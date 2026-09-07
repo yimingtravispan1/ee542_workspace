@@ -7,19 +7,26 @@
 #include <cstdlib>
 #include <thread>
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 
 #include "protocol.h"
 
 // Store a packet until its ACK is received
 struct OutstandingPacket
 {
-    std::vector<char> packet;
+    std::shared_ptr<const std::vector<char>> packet;
     std::chrono::steady_clock::time_point sent_time;
+    bool retransmit_scheduled = false;
 };
 
 // ------------------------------------------------------------
@@ -100,6 +107,67 @@ bool wait_for_packet_type(
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+// ------------------------------------------------------------
+// ACK receiver thread
+// ------------------------------------------------------------
+
+// DATA ACKs are received independently from the paced sending loop. This lets
+// acknowledged packets leave the window immediately instead of waiting until
+// the sender has finished a whole window of sends.
+void receive_acks(
+    int sockfd,
+    std::atomic<bool>& stop_requested,
+    std::unordered_map<uint32_t, OutstandingPacket>& outstanding,
+    std::mutex& outstanding_mutex,
+    std::condition_variable& window_changed)
+{
+    while (!stop_requested.load(std::memory_order_relaxed))
+    {
+        pollfd descriptor{};
+        descriptor.fd = sockfd;
+        descriptor.events = POLLIN;
+
+        int ready = poll(&descriptor, 1, 20);
+
+        if (ready <= 0 || (descriptor.revents & POLLIN) == 0)
+        {
+            continue;
+        }
+
+        // Drain every ACK already queued by the kernel before polling again.
+        while (true)
+        {
+            PacketHeader ack{};
+
+            ssize_t received = recvfrom(sockfd, &ack, sizeof(ack),
+                                        MSG_DONTWAIT, nullptr, nullptr);
+
+            if (received < static_cast<ssize_t>(sizeof(PacketHeader)))
+            {
+                break;
+            }
+
+            if (ack.protocol_id != PROTOCOL_ID ||
+                ack.type != static_cast<uint8_t>(PacketType::ACK))
+            {
+                continue;
+            }
+
+            bool removed = false;
+
+            {
+                std::lock_guard<std::mutex> lock(outstanding_mutex);
+                removed = outstanding.erase(ack.seq) != 0;
+            }
+
+            if (removed)
+            {
+                window_changed.notify_one();
+            }
+        }
     }
 }
 
@@ -278,6 +346,20 @@ int main(int argc, char* argv[])
     // Packets that were sent but have not received an ACK yet
     std::unordered_map<uint32_t, OutstandingPacket> outstanding;
 
+    // The ACK thread is the only thread that receives from the socket during
+    // the DATA phase. The main thread remains the only DATA sender.
+    std::mutex outstanding_mutex;
+    std::condition_variable window_changed;
+    std::atomic<bool> stop_ack_receiver{false};
+
+    std::thread ack_receiver(
+        receive_acks,
+        sockfd,
+        std::ref(stop_ack_receiver),
+        std::ref(outstanding),
+        std::ref(outstanding_mutex),
+        std::ref(window_changed));
+
     uint64_t retransmissions = 0;
     uint64_t packets_sent = 0;
 
@@ -285,16 +367,31 @@ int main(int argc, char* argv[])
     // 6. Sliding-window transfer
     // ------------------------------------------------------------
 
-    while (next_seq < total_packets || !outstanding.empty())
+    // Bound how long new DATA can delay the retransmission scan. ACK reception
+    // remains continuous in the other thread.
+    constexpr std::size_t SEND_BATCH_SIZE = 64;
+
+    while (true)
     {
         // --------------------------------------------------------
         // Fill the sliding window
         // --------------------------------------------------------
 
         // Keep sending new packets while there is space in the window
+        std::size_t sent_in_batch = 0;
+
         while (next_seq < total_packets &&
-               outstanding.size() < window_size)
+               sent_in_batch < SEND_BATCH_SIZE)
         {
+            {
+                std::lock_guard<std::mutex> lock(outstanding_mutex);
+
+                if (outstanding.size() >= window_size)
+                {
+                    break;
+                }
+            }
+
             uint64_t offset =
                 static_cast<uint64_t>(next_seq) * payload_size;
 
@@ -318,54 +415,32 @@ int main(int argc, char* argv[])
             input.read(packet.data() + sizeof(PacketHeader),
                        current_payload_size);
 
-            // Send one DATA packet
-            sendto(sockfd, packet.data(), packet.size(), 0,
+            auto stored_packet =
+                std::make_shared<const std::vector<char>>(std::move(packet));
+
+            // Publish the packet before sending it. Otherwise the ACK thread
+            // could receive a very fast ACK before the packet is in the map.
+            {
+                std::lock_guard<std::mutex> lock(outstanding_mutex);
+
+                OutstandingPacket state{};
+                state.packet = stored_packet;
+                state.sent_time = std::chrono::steady_clock::now();
+
+                outstanding.emplace(next_seq, std::move(state));
+            }
+
+            // Send one DATA packet. Only this thread sends DATA, preserving the
+            // configured pacing order.
+            sendto(sockfd, stored_packet->data(), stored_packet->size(), 0,
                    reinterpret_cast<sockaddr*>(&receiver_addr), sizeof(receiver_addr));
 
             // Control the sending rate
-            pace_packet(next_send_time, packet.size(), pacing_rate_mbps);
-
-            OutstandingPacket state{};
-
-            state.packet = std::move(packet);
-            state.sent_time = std::chrono::steady_clock::now();
-
-            outstanding.emplace(next_seq, std::move(state));
+            pace_packet(next_send_time, stored_packet->size(), pacing_rate_mbps);
 
             ++next_seq;
             ++packets_sent;
-        }
-
-        // --------------------------------------------------------
-        // Process ACKs
-        // --------------------------------------------------------
-
-        // Read all ACKs currently available in the socket
-        while (true)
-        {
-            PacketHeader ack{};
-
-            ssize_t received = recvfrom(sockfd, &ack, sizeof(ack),
-                                        MSG_DONTWAIT, nullptr, nullptr);
-
-            if (received < static_cast<ssize_t>(sizeof(PacketHeader)))
-            {
-                break;
-            }
-
-            if (ack.protocol_id != PROTOCOL_ID ||
-                ack.type != static_cast<uint8_t>(PacketType::ACK))
-            {
-                continue;
-            }
-
-            auto it = outstanding.find(ack.seq);
-
-            if (it != outstanding.end())
-            {
-                // Packet is confirmed, so it no longer needs to be stored
-                outstanding.erase(it);
-            }
+            ++sent_in_batch;
         }
 
         // --------------------------------------------------------
@@ -374,33 +449,92 @@ int main(int argc, char* argv[])
 
         auto now = std::chrono::steady_clock::now();
 
-        for (auto& entry : outstanding)
+        struct Retransmission
         {
-            OutstandingPacket& state = entry.second;
+            uint32_t seq;
+            std::shared_ptr<const std::vector<char>> packet;
+        };
 
-            auto elapsed_ms =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - state.sent_time
-                ).count();
+        std::vector<Retransmission> due_retransmissions;
 
-            if (elapsed_ms >= DEFAULT_RTO_MS)
+        {
+            std::lock_guard<std::mutex> lock(outstanding_mutex);
+
+            for (auto& entry : outstanding)
             {
-                // Only retransmit packets that have not been ACKed
-                sendto(sockfd, state.packet.data(), state.packet.size(), 0,
-                       reinterpret_cast<sockaddr*>(&receiver_addr), sizeof(receiver_addr));
+                OutstandingPacket& state = entry.second;
 
-                // Retransmissions also use pacing to avoid a new burst
-                pace_packet(next_send_time, state.packet.size(), pacing_rate_mbps);
+                auto elapsed_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - state.sent_time
+                    ).count();
 
-                state.sent_time = std::chrono::steady_clock::now();
-
-                ++retransmissions;
-                ++packets_sent;
+                if (!state.retransmit_scheduled &&
+                    elapsed_ms >= DEFAULT_RTO_MS)
+                {
+                    state.retransmit_scheduled = true;
+                    due_retransmissions.push_back({entry.first, state.packet});
+                }
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
+        for (const Retransmission& retransmission : due_retransmissions)
+        {
+            bool still_outstanding = false;
+
+            {
+                std::lock_guard<std::mutex> lock(outstanding_mutex);
+
+                auto it = outstanding.find(retransmission.seq);
+
+                if (it != outstanding.end() &&
+                    it->second.packet == retransmission.packet)
+                {
+                    it->second.sent_time = std::chrono::steady_clock::now();
+                    it->second.retransmit_scheduled = false;
+                    still_outstanding = true;
+                }
+            }
+
+            // The ACK thread may have removed this packet while the timeout
+            // list was being built.
+            if (!still_outstanding)
+            {
+                continue;
+            }
+
+            sendto(sockfd,
+                   retransmission.packet->data(),
+                   retransmission.packet->size(),
+                   0,
+                   reinterpret_cast<sockaddr*>(&receiver_addr),
+                   sizeof(receiver_addr));
+
+            pace_packet(next_send_time,
+                        retransmission.packet->size(),
+                        pacing_rate_mbps);
+
+            ++retransmissions;
+            ++packets_sent;
+        }
+
+        std::unique_lock<std::mutex> lock(outstanding_mutex);
+
+        if (next_seq >= total_packets && outstanding.empty())
+        {
+            break;
+        }
+
+        // If no packet was sent, wait briefly for an ACK or the next timeout.
+        // The timeout also ensures lost packets are periodically reconsidered.
+        if (sent_in_batch == 0 && due_retransmissions.empty())
+        {
+            window_changed.wait_for(lock, std::chrono::milliseconds(1));
+        }
     }
+
+    stop_ack_receiver.store(true, std::memory_order_relaxed);
+    ack_receiver.join();
 
     // ------------------------------------------------------------
     // 7. FIN handshake
