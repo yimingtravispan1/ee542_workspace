@@ -169,10 +169,6 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 
 ![UDP iperf Server to Client](images/case3_udp_server_to_client_mtu_9000.png)
 
-##### TCP iperf: Client → Server
-
-![TCP iperf Client to Server](images/case3_tcp_client_to_server_mtu_9000.png)
-
 ##### TCP iperf: Server → Client
 
 ![TCP iperf Client to Server](images/case3_tcp_server_to_client_mtu_9000.png)
