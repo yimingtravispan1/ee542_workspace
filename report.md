@@ -219,6 +219,10 @@ The MTU 9000 TCP tests were instead limited by their 16 KB TCP window (~0.65 Mbi
 
 ## Part 2: Fast and Reliable File Transfer
 
+### Multithreading Improvements
+
+The sender was improved with a dedicated ACK receiver thread, allowing ACKs to be processed while the main thread continues paced transmission and retransmission. This releases sliding-window space more quickly and reduces pauses between sending and ACK processing. The receiver now uses a separate file-writer thread and a thread-safe queue, so disk I/O does not block packet reception or ACK generation. Mutexes and condition variables synchronize shared state and avoid unnecessary busy waiting. These changes improve pipeline utilization and are especially useful on high-RTT links.
+
 ### Results
 
 | Case | MTU | Pacing Rate | Time (s) | Goodput (Mbps) | Retransmissions | MD5 Match |
