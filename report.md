@@ -125,7 +125,7 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 ### Case 3: RTT 200 ms, Packet Loss 0%, Router Limited to 80 Mbps
 <img width="643" height="144" alt="Screenshot 2026-09-01 at 9 56 22 PM" src="https://github.com/user-attachments/assets/d03e1f91-d51c-4c9f-a7c6-8ad724773509" />
 
-#### Results
+#### MTU 1500 Results
 
 ##### Ping: Client → Server
 
@@ -151,16 +151,47 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 
 ![TCP iperf Client to Server](images/case3_tcp_server_to_client.png)
 
+#### MTU 9000 Results
+
+##### Ping: Client → Server
+
+![Ping Client to Server](images/case3_ping_client_to_server_mtu_9000.png)
+
+##### Ping: Server → Client
+
+![Ping Server to Client](images/case3_ping_server_to_client_mtu_9000.png)
+
+##### UDP iperf: Client → Server
+
+![UDP iperf Client to Server](images/case3_udp_client_to_server_mtu_9000.png)
+
+##### UDP iperf: Server → Client
+
+![UDP iperf Server to Client](images/case3_udp_server_to_client_mtu_9000.png)
+
+##### TCP iperf: Client → Server
+
+![TCP iperf Client to Server](images/case3_tcp_client_to_server_mtu_9000.png)
+
+##### TCP iperf: Server → Client
+
+![TCP iperf Client to Server](images/case3_tcp_server_to_client_mtu_9000.png)
+
 #### Summary
 
-| Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss |
-|---|---|---:|---:|---:|
-| Ping | Client → Server | 224.361 ms | - | 0% |
-| Ping | Server → Client | 224.139 ms | - | 0% |
-| UDP iperf | Client → Server | - | 70.5 Mbits/sec | 28% |
-| UDP iperf | Server → Client | - | 71.7 Mbits/sec | 28% |
-| TCP iperf | Client → Server | - | 41.6 Mbits/sec receiver | - |
-| TCP iperf | Server → Client | - | 56.5 Mbits/sec receiver | - |
+| MTU | Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss |
+|---: |---|---|---:|---:|---:|
+| 1500 | Ping | Client → Server | 224.361 ms | - | 0% |
+| 1500 | Ping | Server → Client | 224.139 ms | - | 0% |
+| 1500 | UDP iperf | Client → Server | - | 70.5 Mbits/sec | 28% |
+| 1500 | UDP iperf | Server → Client | - | 71.7 Mbits/sec | 28% |
+| 1500 | TCP iperf | Client → Server | - | 41.6 Mbits/sec receiver | - |
+| 1500 | TCP iperf | Server → Client | - | 56.5 Mbits/sec receiver | - |
+| 9000 | Ping | Client → Server | 201.155 ms | — | 34% |
+| 9000 | Ping | Server → Client | 201.207 ms | — | 38.5% |
+| 9000 | UDP iperf | Client → Server | — | 77.7 Mbit/s | 22% |
+| 9000 | UDP iperf | Server → Client | — | 77.7 Mbit/s | 22% |
+| 9000 | TCP iperf | Client → Server | — | 469 Kbit/s | — |
 
 ## noted: throughput of case 3 was more than 20x of that of case 2
 
