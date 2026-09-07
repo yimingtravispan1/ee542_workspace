@@ -57,39 +57,70 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 
 #### Results
 
-##### Ping: Client → Server
+##### MTU 1500
 
-![Ping Client to Server](images/case2_ping_client_to_server.png)
+**Ping: Client → Server**
 
-##### Ping: Server → Client
+![Case 2 MTU 1500 ping from Client to Server](images/case2_ping_client_to_server.png)
 
-![Ping Server to Client](images/case2_ping_server_to_client.png)
+**Ping: Server → Client**
 
-##### UDP iperf: Client → Server
+![Case 2 MTU 1500 ping from Server to Client](images/case2_ping_server_to_client.png)
 
-![UDP iperf Client to Server](images/case2_udp_client_to_server.png)
+**UDP iperf: Client → Server**
 
-##### UDP iperf: Server → Client
+![Case 2 MTU 1500 UDP iperf from Client to Server](images/case2_udp_client_to_server.png)
 
-![UDP iperf Server to Client](images/case2_udp_server_to_client.png)
+**UDP iperf: Server → Client**
 
-##### TCP iperf: Client → Server
+![Case 2 MTU 1500 UDP iperf from Server to Client](images/case2_udp_server_to_client.png)
 
-![TCP iperf Client to Server](images/case2_tcp_client_to_server.png)
+**TCP iperf: Client → Server**
+
+![Case 2 MTU 1500 TCP iperf from Client to Server](images/case2_tcp_client_to_server.png)
+
+##### MTU 9000
+
+**Ping: Client → Server**
+
+![Case 2 MTU 9000 ping from Client to Server](images/case2_ping_client_to_server_mtu_9000.png)
+
+**Ping: Server → Client**
+
+![Case 2 MTU 9000 ping from Server to Client](images/case2_ping_server_to_client_mtu_9000.png)
+
+**UDP iperf: Client → Server**
+
+![Case 2 MTU 9000 UDP iperf from Client to Server](images/case2_udp_client_to_server_mtu_9000.png)
+
+**UDP iperf: Server → Client**
+
+![Case 2 MTU 9000 UDP iperf from Server to Client](images/case2_udp_server_to_client_mtu_9000.png)
+
+**TCP iperf: Client → Server**
+
+![Case 2 MTU 9000 TCP iperf from Client to Server](images/case2_tcp_client_to_server_mtu_9000.png)
 
 #### Summary
 
-| Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss |
-|---|---|---:|---:|---:|
-| Ping | Client → Server | 201.375 ms | - | 37% |
-| Ping | Server → Client | 201.418 ms | - | 35.5% |
-| UDP iperf | Client → Server | - | 77.6 Mbits/sec | 22% |
-| UDP iperf | Server → Client | - | 77.8 Mbits/sec | 22% |
-| TCP iperf | Client → Server | - | 95.9 Kbits/sec | - |
+| MTU | Test | Direction | Average RTT | Throughput | Packet Loss |
+|---:|---|---|---:|---:|---:|
+| 1500 | Ping | Client → Server | 201.375 ms | — | 37% |
+| 1500 | Ping | Server → Client | 201.418 ms | — | 35.5% |
+| 1500 | UDP iperf | Client → Server | — | 77.6 Mbit/s | 22% |
+| 1500 | UDP iperf | Server → Client | — | 77.8 Mbit/s | 22% |
+| 1500 | TCP iperf | Client → Server | — | 95.9 Kbit/s | — |
+| 9000 | Ping | Client → Server | 201.155 ms | — | 34% |
+| 9000 | Ping | Server → Client | 201.207 ms | — | 38.5% |
+| 9000 | UDP iperf | Client → Server | — | 77.7 Mbit/s | 22% |
+| 9000 | UDP iperf | Server → Client | — | 77.7 Mbit/s | 22% |
+| 9000 | TCP iperf | Client → Server | — | 469 Kbit/s | — |
 
-#### Observation
+#### Observations
 
-UDP throughput remained around 78 Mbps, while TCP throughput dropped significantly under high RTT and packet loss.
+- The measured RTT (~**201 ms**) and round-trip loss (**34%–38.5%**) were consistent with the configured 200 ms RTT and 20% per-direction loss.
+- UDP remained stable at about **77.7 Mbit/s** regardless of MTU.
+- High RTT and loss severely limited TCP; MTU 9000 improved throughput from **95.9 to 469 Kbit/s**, but it remained far below the link rate.
 
 ### Case 3: RTT 200 ms, Packet Loss 0%, Router Limited to 80 Mbps
 <img width="643" height="144" alt="Screenshot 2026-09-01 at 9 56 22 PM" src="https://github.com/user-attachments/assets/d03e1f91-d51c-4c9f-a7c6-8ad724773509" />
