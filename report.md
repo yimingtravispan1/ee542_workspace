@@ -6,13 +6,20 @@
 
 #### Summary
 
-| Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss |
-|---|---|---:|---:|---:|
-| Ping | Client → Server | 11.774 ms | - | 2.5% round-trip |
-| Ping | Server → Client | 11.887 ms | - | 2.0% round-trip |
-| UDP iperf | Client → Server | - | Verified in test video | ~1% configured per direction |
-| UDP iperf | Server → Client | - | Verified in test video | ~1% configured per direction |
-| TCP iperf | Client → Server | - | 23.8 Mbits/sec receiver | 150 retransmissions |
+### Case 1 — RTT 10 ms, 1% Bi-directional Packet Loss, 100 Mbit/s
+
+| MTU | Test | Direction | Average RTT | Throughput / Bandwidth | Packet Loss / Retransmissions |
+|---:|---|---|---:|---:|---:|
+| 1500 | Ping | Client → Server | 11.774 ms | — | 2.5% round-trip |
+| 1500 | Ping | Server → Client | 11.887 ms | — | 2.0% round-trip |
+| 1500 | UDP iperf | Client → Server | — | Verified in test video | ~1% configured per direction |
+| 1500 | UDP iperf | Server → Client | — | Verified in test video | ~1% configured per direction |
+| 1500 | TCP iperf | Client → Server | — | 23.8 Mbit/s receiver | 150 retransmissions |
+| 9000 | Ping | Client → Server | 12.061 ms | — | 3.0% round-trip |
+| 9000 | Ping | Server → Client | 11.779 ms | — | 2.0% round-trip |
+| 9000 | UDP iperf | Client → Server | — | 98.6 Mbit/s receiver | 1.3% |
+| 9000 | UDP iperf | Server → Client | — | 98.3 Mbit/s receiver | 1.5% |
+| 9000 | TCP iperf | Client → Server | — | 83.2 Mbit/s receiver | 125 retransmissions |
 
 #### Observation
 
