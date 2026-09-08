@@ -225,6 +225,114 @@ The MTU 9000 TCP tests were instead limited by their 16 KB TCP window (~0.65 Mbi
 
 
 ## Part 2: Fast and Reliable File Transfer
+## Protocol Design and Implementation
+
+This project implements a reliable file transfer protocol on top of UDP.
+
+UDP provides low-overhead datagram delivery, but it does not guarantee packet delivery, ordering, duplicate suppression, or retransmission. To provide reliable file transfer, the protocol adds its own control and recovery mechanisms at the application layer.
+
+### Overall Transfer Flow
+
+The transfer is divided into three stages:
+
+1. **Connection Setup**
+   - The sender first sends a `META` packet containing the file size, payload size, and total number of data packets.
+   - The receiver responds with `META_ACK`.
+   - If the acknowledgement is lost, the sender retransmits the `META` packet.
+
+2. **Reliable Data Transfer**
+   - The sender divides the file into sequence-numbered `DATA` packets.
+   - Multiple packets can be transmitted within a sliding window without waiting for each individual acknowledgement.
+   - Each valid `DATA` packet is acknowledged by the receiver using an `ACK` containing the corresponding sequence number.
+   - Packets that are not acknowledged before the retransmission timeout are selectively retransmitted.
+   - Sender-side pacing is used to control the packet injection rate and reduce burst-related packet drops.
+
+3. **Transfer Termination**
+   - After all data packets have been acknowledged, the sender transmits a `FIN` packet.
+   - The receiver accepts the `FIN` only after all data packets have been received in sequence.
+   - The receiver replies with `FIN_ACK` to complete the transfer.
+   - The receiver remains active briefly after completion so that it can respond again if the original `FIN_ACK` is lost.
+
+### Packet Structure
+
+Each protocol packet contains a common header:
+
+- `protocol_id` — identifies packets belonging to this protocol
+- `seq` — sequence number used for ordering, acknowledgement, duplicate detection, and retransmission
+- `length` — size of the current payload
+- `type` — identifies the packet as `META`, `DATA`, `ACK`, `FIN`, etc.
+
+The protocol defines the following packet types:
+
+- `META`
+- `META_ACK`
+- `DATA`
+- `ACK`
+- `FIN`
+- `FIN_ACK`
+
+### Sender Design
+
+The sender is responsible for:
+
+- Reading the input file
+- Splitting it into fixed-size payloads
+- Assigning sequence numbers to each packet
+- Maintaining a sliding window of unacknowledged packets
+- Processing incoming ACKs
+- Detecting retransmission timeouts
+- Selectively retransmitting only missing packets
+- Applying packet pacing
+- Reporting transfer time, throughput, and retransmission statistics
+
+Unacknowledged packets are stored using their sequence number together with the packet data and send timestamp. When an ACK arrives, the corresponding packet is removed from the outstanding set.
+
+This design allows multiple packets to remain in flight and avoids the performance limitation of Stop-and-Wait transmission, especially under high RTT.
+
+### Receiver Design
+
+The receiver is responsible for:
+
+- Receiving and validating protocol packets
+- Processing transfer metadata
+- Sending acknowledgements
+- Detecting duplicate packets
+- Buffering packets that arrive out of order
+- Delivering data to the output file in the correct sequence
+- Handling reliable transfer termination
+
+The receiver maintains an `expected_seq` value representing the next packet that can be delivered in order.
+
+If packets arrive ahead of `expected_seq`, they are temporarily stored in an out-of-order buffer. Once the missing packet arrives, all newly consecutive packets can be processed in sequence.
+
+Duplicate packets are not written twice, but they are acknowledged again because the previous ACK may have been lost.
+
+### Sliding Window and Selective Retransmission
+
+The protocol uses a sliding-window design so that multiple packets can be transmitted before their ACKs return.
+
+This is particularly important in high-latency environments because a Stop-and-Wait design would leave the link idle while waiting for acknowledgements.
+
+Only packets that remain unacknowledged beyond the retransmission timeout are retransmitted. This selective retransmission approach avoids unnecessarily resending packets that have already been successfully received.
+
+### Sender Pacing
+
+A large sliding window alone does not control how quickly packets are injected into the network.
+
+Without pacing, UDP can generate a large burst of packets in a very short period of time, which may overflow the configured network queue and cause additional packet loss.
+
+The sender therefore spaces packet transmissions according to a configurable pacing rate. This helps keep the sending rate closer to the available network bandwidth and reduces burst-related retransmissions.
+
+### Out-of-Order Handling
+
+Because UDP does not guarantee packet ordering, packets may arrive in a different order from the order in which they were sent.
+
+The receiver therefore buffers packets using their sequence numbers.
+
+For example:
+
+Sent:     0 1 2 3 4
+Received: 0 1 3 4 2
 
 ### Multithreading Improvements
 
