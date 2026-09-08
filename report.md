@@ -219,7 +219,7 @@ The required bandwidth rate remained fixed at 100 Mbit/s. Only the TBF queue par
 
 #### Critical Thinking
 
-Case 2 and Case 3 have similar RTTs (~200 ms) and UDP throughput (~78 Mbit/s), but Case 2's 20% random loss repeatedly reduces the TCP congestion window; the high RTT further slows ACKs and loss recovery. Without random loss, Case 3 can sustain much higher MTU 1500 TCP throughput, while its UDP loss results from the 80 Mbit/s bottleneck rather than the configured network conditions.
+Case 2 and Case 3 have similar RTTs (~200 ms) and UDP throughput (~78 Mbit/s), but Case 2's 20% random loss repeatedly reduces the TCP congestion window; the high RTT further slows ACKs and loss recovery. Without random loss, Case 3 can sustain much higher MTU 1500 TCP throughput, while its UDP loss results from the 80 Mbit/s bottleneck rather than the configured network conditions. At this bottleneck, excess UDP packets accumulate in the router's egress queue and are dropped when its buffer becomes full.
 
 The MTU 9000 TCP tests were instead limited by their 16 KB TCP window (~0.65 Mbit/s at 200 ms RTT). Because the MTU 1500 and MTU 9000 tests used different window conditions, MTU effects cannot be compared reliably without retesting with the same iperf version, TCP window, and duration.
 
@@ -232,6 +232,40 @@ This project implements a reliable file transfer protocol on top of UDP.
 UDP provides low-overhead datagram delivery, but it does not guarantee packet delivery, ordering, duplicate suppression, or retransmission. To provide reliable file transfer, the protocol adds its own control and recovery mechanisms at the application layer.
 
 ### Overall Transfer Flow
+
+The following flow chart summarizes the reliable transfer workflow and its key
+recovery mechanisms.
+
+```mermaid
+flowchart TD
+    A([Start]) --> B[Sender reads file and calculates metadata]
+    B --> C[Send META]
+    C --> D[Receiver validates META,<br/>opens output file, and sends META_ACK]
+    D --> E{META_ACK received?}
+    E -- Timeout --> C
+    E -- Yes --> F[Start ACK receiver and writer threads]
+
+    F --> G[Send paced, sequence-numbered DATA<br/>within the sliding window]
+    G --> H[Receiver validates and buffers DATA,<br/>then ACKs every valid packet]
+    H --> I[Move contiguous data to writer queue<br/>and write it in order]
+    H --> J[ACK thread removes acknowledged packets<br/>from the outstanding window]
+    J --> K{All DATA acknowledged?}
+    K -- No --> L{Packet timed out?}
+    L -- Yes --> M[Selectively retransmit missing packet]
+    L -- No --> G
+    M --> H
+
+    K -- Yes --> N[Send FIN]
+    N --> O{Receiver has all DATA?}
+    O -- No --> G
+    O -- Yes --> P[Send FIN_ACK]
+    P --> Q{FIN_ACK received?}
+    Q -- Timeout --> N
+    Q -- Yes --> R[Report statistics and close sender]
+    P --> S[Receiver keeps a 2-second grace period,<br/>then closes after writer finishes]
+    R --> T([Transfer complete])
+    S --> T
+```
 
 The transfer is divided into three stages:
 
@@ -334,9 +368,25 @@ For example:
 Sent:     0 1 2 3 4
 Received: 0 1 3 4 2
 
+### Earlier Implementation Attempt
+
+An earlier C prototype developed by **Yu Xia** used a sliding window, pacing, acknowledgements, and retransmissions. However, its sender handled transmission and feedback in one event loop, while its receiver performed file writes directly in the network loop. This approach could delay ACK processing and packet reception under high RTT, loss, or disk activity, motivating the current multithreaded design and larger socket buffers.
+
 ### Multithreading Improvements
 
 The sender was improved with a dedicated ACK receiver thread, allowing ACKs to be processed while the main thread continues paced transmission and retransmission. This releases sliding-window space more quickly and reduces pauses between sending and ACK processing. The receiver now uses a separate file-writer thread and a thread-safe queue, so disk I/O does not block packet reception or ACK generation. Mutexes and condition variables synchronize shared state and avoid unnecessary busy waiting. These changes improve pipeline utilization and are especially useful on high-RTT links.
+
+### Program Usage
+
+The file-transfer utility is implemented in C++17 for Linux using UDP/IP sockets and provides a command-line interface. The sender specifies the source file and receiver IP, while the receiver specifies the destination file.
+
+```bash
+make
+./receiver <port> <output_file>
+./sender <receiver_ip> <port> <input_file> [payload_size] [window_size] [pacing_rate_mbps]
+```
+
+For example, run `./receiver 9000 received.bin` first, then run `./sender 10.0.0.2 9000 input.bin 1400 4096 90` on the sending host.
 
 ### Results
 
@@ -348,3 +398,21 @@ The sender was improved with a dedicated ACK receiver thread, allowing ACKs to b
 | Case 2 | 9001 | 95 Mbps | 158.518 | 54.189 | 85,230 | Yes |
 | Case 3 | 1500 | 75 Mbps | 115.597 | 74.309 | 5 | Yes |
 | Case 3 | 9001 | 75 Mbps | 111.600 | 76.971 | 0 | Yes |
+
+### Reliability Verification
+
+The matching MD5 hashes confirm that the received file is identical to the original file.
+
+```text
+Original: 44ac634a897fa645b24ba306ecade8e9
+Received: 44ac634a897fa645b24ba306ecade8e9
+MD5 Match: Yes
+```
+
+### Results Analysis
+
+The protocol successfully transferred the 1 GB file in all six tests, and all received files passed MD5 verification, confirming reliable delivery. The achieved goodput was above the required 20 Mbps in every case.
+
+MTU 9001 consistently performed better than MTU 1500, providing slightly higher goodput and significantly fewer retransmissions. The improvement was most noticeable in Case 2, where goodput increased from 50.3 to 54.2 Mbps and retransmissions decreased from about 435k to 85k. Case 2 was the most challenging environment because its 200 ms RTT and 20% packet loss caused frequent losses and slower recovery.
+
+Case 3 achieved the best overall performance, reaching 77.0 Mbps with MTU 9001 and zero retransmissions. Since no random packet loss was configured and the pacing rate was 75 Mbps, close to the router's 80 Mbps limit, the protocol could use the available bandwidth efficiently without excessive congestion. Overall, the results show that the protocol remained reliable under all three network conditions, while the larger MTU generally improved efficiency and reduced retransmission overhead.
