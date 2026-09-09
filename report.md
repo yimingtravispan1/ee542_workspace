@@ -1,5 +1,13 @@
 # EE 542 Lab 2 – Fast, Reliable File Transfer
 
+## Team Members and Contributions
+
+| Team Member | GitHub Account | Contributions |
+|---|---|---|
+| Junyu Zhao | `Paralyz3dz` | Implemented the initial reliable UDP file-transfer protocol, including the sender, receiver, packet format, build configuration, sliding-window transmission, acknowledgements, and retransmissions. Improved receiver reliability under control-packet loss, added sender-side pacing, conducted and documented the Part 1 Case 1 experiments, and contributed to report refinement. |
+| Yu Xia | `yxia` / `lanluolan` | Conducted and documented the Part 1 Case 2 experiments for MTU 1500 and MTU 9000, added Case 3 MTU 9000 test evidence, and documented the Part 2 experimental results. Developed an independent C implementation of the Part 2 custom protocol on the `feat/part2-yxia` branch, including session management, CRC32 integrity checking, ACK/NACK feedback, sliding-window transfer, timeout retransmission, sender pacing, and transfer-result reporting. Although this prototype was not selected as the final implementation, it contributed an alternative protocol design and implementation for evaluation. Also improved the final protocol with a dedicated ACK-processing thread, asynchronous file writing, synchronization, and build updates, and expanded the protocol design and usage documentation. |
+| Yiming Pan | `yimingtravispan1` | Conducted the Part 1 Case 3 experiments, uploaded the ping, UDP, and TCP test results in both directions, and documented the Case 3 configuration, measurements, observations, and related report content. |
+
 ## Part 1: Simulating Networking Environments
 
 ### Case 1 The round-trip time (RTT) of 10ms with the Loss rate of 1% (bi-directional) on a network configured to transfer at 100Mbits/sec for the server, client, and router. (Tests conducted by Junyu Zhao)
@@ -416,3 +424,22 @@ The protocol successfully transferred the 1 GB file in all six tests, and all re
 MTU 9001 consistently performed better than MTU 1500, providing slightly higher goodput and significantly fewer retransmissions. The improvement was most noticeable in Case 2, where goodput increased from 50.3 to 54.2 Mbps and retransmissions decreased from about 435k to 85k. Case 2 was the most challenging environment because its 200 ms RTT and 20% packet loss caused frequent losses and slower recovery.
 
 Case 3 achieved the best overall performance, reaching 77.0 Mbps with MTU 9001 and zero retransmissions. Since no random packet loss was configured and the pacing rate was 75 Mbps, close to the router's 80 Mbps limit, the protocol could use the available bandwidth efficiently without excessive congestion. Overall, the results show that the protocol remained reliable under all three network conditions, while the larger MTU generally improved efficiency and reduced retransmission overhead.
+
+## Submission Links and GitHub Logs
+
+### YouTube Video
+
+
+### GitHub Repository
+
+[https://github.com/yimingtravispan1/ee542_workspace](https://github.com/yimingtravispan1/ee542_workspace)
+
+### GitHub Development Logs
+
+The complete development history is available in the repository's [commit log](https://github.com/yimingtravispan1/ee542_workspace/commits/main/). Key contribution records are summarized below.
+
+| Contributor | GitHub Development Record | Main Work Reflected in the Log |
+|---|---|---|
+| Junyu Zhao (`Paralyz3dz`) | [`185bdad`](https://github.com/yimingtravispan1/ee542_workspace/commit/185bdad), [`1e650e3`](https://github.com/yimingtravispan1/ee542_workspace/commit/1e650e3), [`b9ad3be`](https://github.com/yimingtravispan1/ee542_workspace/commit/b9ad3be), [`b571358`](https://github.com/yimingtravispan1/ee542_workspace/commit/b571358) | Case 1 documentation, initial reliable UDP protocol, receiver reliability improvements, and sender-side pacing |
+| Yu Xia (`yxia` / `lanluolan`) | [`58a134b`](https://github.com/yimingtravispan1/ee542_workspace/commit/58a134b), [`cb58f9b`](https://github.com/yimingtravispan1/ee542_workspace/commit/cb58f9b), [`4e7812b`](https://github.com/yimingtravispan1/ee542_workspace/commit/4e7812b), [`6a8fb03`](https://github.com/yimingtravispan1/ee542_workspace/commit/6a8fb03) | Case 2 experiments, Part 2 experimental results, multithreaded protocol improvements, and protocol report documentation |
+| Yiming Pan (`yimingtravispan1`) | [`5348a80`](https://github.com/yimingtravispan1/ee542_workspace/commit/5348a80), [`d8d47ba`](https://github.com/yimingtravispan1/ee542_workspace/commit/d8d47ba), [`b3c9fdc`](https://github.com/yimingtravispan1/ee542_workspace/commit/b3c9fdc) | Case 3 experiment evidence, measurements, analysis, and report documentation |
