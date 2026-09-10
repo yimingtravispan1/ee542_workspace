@@ -6,23 +6,19 @@ This repository contains a reliable UDP/IP file-transfer utility implemented in 
 
 ```text
 .
-├── src/         # reliable_udp souce code
+├── include/     # Protocol definitions
+├── src/         # Sender and receiver source code
+├── images/      # Experimental screenshots
 ├── Makefile     # Build configuration
-└── report.md    # Design and results
+└── report.md    # Design, results, and analysis
 ```
 
 ## Build and Run
 
 ```bash
-Start Server before Client
-Server:
-g++ -O2 -std=c++17 -pthread reliable_udp.cpp -o reliable
-./reliable server 51719 received.bin 2
-
-Client:
-1. create a 1GiB file : 
-dd if=/dev/urandom of=data.bin bs=1M count=1024 status=progress
-2. compile and run
-g++ -O2 -std=c++17 -pthread quic.cpp -o reliable
-./reliable client 192.168.10.100 51719 data.bin 2
+make
+./receiver <port> <output_file>
+./sender <receiver_ip> <port> <input_file> [payload_size] [window_size] [pacing_rate_mbps]
 ```
+
+Start the receiver before the sender. See [report.md](report.md) for the protocol design and experimental results.
