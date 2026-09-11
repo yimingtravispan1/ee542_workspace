@@ -378,7 +378,7 @@ Received: 0 1 3 4 2
 
 ### Earlier Implementation Attempt
 
-An earlier C prototype developed by **Junyu Zhao** used a sliding window, pacing, acknowledgements, and retransmissions. However, its sender handled transmission and feedback in one event loop, while its receiver performed file writes directly in the network loop. This approach could delay ACK processing and packet reception under high RTT, loss, or disk activity, motivating the current multithreaded design and larger socket buffers.
+An earlier C prototype developed by **Yu Xia** is preserved on the [`feat/part2-yxia`](https://github.com/yimingtravispan1/ee542_workspace/tree/feat/part2-yxia) branch and was not merged into the `main` branch. This alternative implementation used a sliding window, pacing, acknowledgements, and retransmissions. However, its sender handled transmission and feedback in one event loop, while its receiver performed file writes directly in the network loop. This approach could delay ACK processing and packet reception under high RTT, loss, or disk activity, motivating the current multithreaded design and larger socket buffers.
 
 ### Multithreading Improvements
 
